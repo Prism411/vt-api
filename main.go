@@ -8,25 +8,39 @@ import (
 	"strconv"
 )
 
-// Usuario define a estrutura dos dados recebidos.
 type Usuario struct {
-	Nome     string `json:"name"`     // Nome do usuário
-	Humor    string `json:"humor"`    // Estado de humor do usuário
-	Faltas   int    `json:"faltas"`   // Número de faltas
-	Filepath string `json:"filepath"` // Caminho do arquivo
+	Nome     string `json:"name"`
+	Humor    string `json:"humor"`
+	Faltas   int    `json:"faltas"`
+	Filepath string `json:"filepath"`
 }
 
-// Lista para armazenar os dados recebidos em blocos de até 10 usuários.
 var blocos [][]Usuario
 
+func enableCors(w *http.ResponseWriter) {
+	(*w).Header().Set("Access-Control-Allow-Origin", "*")
+	(*w).Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
+	(*w).Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
+}
+
+// Novo middleware para aplicar CORS
+func corsMiddleware(handler http.Handler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		enableCors(&w)
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		handler.ServeHTTP(w, r)
+	}
+}
+
 func updateStatesHandler(w http.ResponseWriter, r *http.Request) {
-	// Verifica se o método é POST.
 	if r.Method != "POST" {
 		http.Error(w, "Método não suportado", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Decodifica o corpo da requisição para um slice de Usuario.
 	var usuariosRecebidos []Usuario
 	err := json.NewDecoder(r.Body).Decode(&usuariosRecebidos)
 	if err != nil {
@@ -34,21 +48,17 @@ func updateStatesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Adiciona os usuários recebidos em blocos de 10.
 	for _, usuario := range usuariosRecebidos {
 		if len(blocos) == 0 || len(blocos[len(blocos)-1]) >= 10 {
-			// Cria um novo bloco se necessário.
 			blocos = append(blocos, []Usuario{})
 		}
 		blocos[len(blocos)-1] = append(blocos[len(blocos)-1], usuario)
 	}
 
-	// Resposta de sucesso.
 	fmt.Fprintf(w, "Dados recebidos com sucesso!")
 }
 
 func listarUsuariosHandler(w http.ResponseWriter, r *http.Request) {
-	// Obtém o número do bloco da query string, começando de 1.
 	blocoQuery := r.URL.Query().Get("bloco")
 	bloco, err := strconv.Atoi(blocoQuery)
 	if err != nil || bloco < 1 || bloco > len(blocos) {
@@ -56,24 +66,29 @@ func listarUsuariosHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Configura o Content-Type como application/json.
 	w.Header().Set("Content-Type", "application/json")
-
-	// Codifica o bloco especificado de usuarios em JSON e envia na resposta.
 	err = json.NewEncoder(w).Encode(blocos[bloco-1])
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
+func disableCacheMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Adicionando cabeçalhos para desabilitar cache
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate") // HTTP 1.1.
+		w.Header().Set("Pragma", "no-cache")                                   // HTTP 1.0.
+		w.Header().Set("Expires", "0")                                         // Proxies.
+		next.ServeHTTP(w, r)
+	})
+}
 
 func main() {
-	// Define o handler para a rota "/updateStates".
-	http.HandleFunc("/updateStates", updateStatesHandler)
+	fs := http.FileServer(http.Dir("./packages/graph"))
+	http.Handle("/packages/graph/", corsMiddleware(disableCacheMiddleware(http.StripPrefix("/packages/graph/", fs))))
 
-	// Nova rota para listar os usuários por blocos.
-	http.HandleFunc("/usuarios", listarUsuariosHandler)
+	http.HandleFunc("/updateStates", corsMiddleware(http.HandlerFunc(updateStatesHandler)))
+	http.HandleFunc("/usuarios", corsMiddleware(http.HandlerFunc(listarUsuariosHandler)))
 
-	// Inicia o servidor.
 	fmt.Println("Servidor iniciado na porta 8080...")
 	if err := http.ListenAndServe(":8080", nil); err != nil {
 		log.Fatal(err)
