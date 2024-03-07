@@ -1,150 +1,81 @@
 package main
 
-/*
 import (
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 )
 
-type StateUpdate struct {
-	Name  string `json:"name"`
-	Humor string `json:"humor"`
+// Usuario define a estrutura dos dados recebidos.
+type Usuario struct {
+	Nome     string `json:"name"`     // Nome do usuário
+	Humor    string `json:"humor"`    // Estado de humor do usuário
+	Faltas   int    `json:"faltas"`   // Número de faltas
+	Filepath string `json:"filepath"` // Caminho do arquivo
 }
 
-type HumorUpdate struct {
-	Name  string `json:"Name"`
-	Humor string `json:"Humor"`
-}
-
-var humorUpdates []HumorUpdate
-
-func enableCors(w *http.ResponseWriter) {
-	(*w).Header().Set("Access-Control-Allow-Origin", "*")
-	(*w).Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
-	(*w).Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
-}
-
-func applyCorsAndOptions(w http.ResponseWriter, r *http.Request) bool {
-	enableCors(&w)
-	if r.Method == "OPTIONS" {
-		w.WriteHeader(http.StatusOK)
-		return false
-	}
-	return true
-}
-
-func receiveHumorUpdates(w http.ResponseWriter, r *http.Request) {
-	if !applyCorsAndOptions(w, r) {
-		return
-	}
-	if r.Method == "OPTIONS" {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
-	if r.Method == "POST" {
-		var updates []HumorUpdate
-		err := json.NewDecoder(r.Body).Decode(&updates)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		humorUpdates = append(humorUpdates, updates...)
-		fmt.Fprintf(w, "Atualizações de humor recebidas e armazenadas com sucesso.")
-	} else {
-		http.Error(w, "Método não suportado", http.StatusMethodNotAllowed)
-	}
-}
-
-func fetchUserDataHandler(w http.ResponseWriter, r *http.Request) {
-	enableCors(&w)
-	if r.Method == "OPTIONS" {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
-	var usersData []UserData = []UserData{
-		{"Usuario 1", 2, "Bom", "packages/graph/regressao_20.png"},
-		{"Usuario 2", 0, "Ótimo", "packages/graph/regressao_20.png"},
-		// Adicione mais usuários conforme necessário
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(usersData); err != nil {
-		log.Printf("Erro ao codificar a resposta JSON: %v", err)
-		http.Error(w, "Erro interno do servidor", http.StatusInternalServerError)
-	}
-}
+// Lista para armazenar os dados recebidos em blocos de até 10 usuários.
+var blocos [][]Usuario
 
 func updateStatesHandler(w http.ResponseWriter, r *http.Request) {
-	if !applyCorsAndOptions(w, r) {
-		return
-	}
-	if r.Method == "OPTIONS" {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
+	// Verifica se o método é POST.
 	if r.Method != "POST" {
 		http.Error(w, "Método não suportado", http.StatusMethodNotAllowed)
 		return
 	}
 
-	var stateUpdates []StateUpdate
-	if err := json.NewDecoder(r.Body).Decode(&stateUpdates); err != nil {
-		log.Printf("Erro ao decodificar a requisição JSON: %v", err)
-		http.Error(w, "Erro no formato de entrada", http.StatusBadRequest)
+	// Decodifica o corpo da requisição para um slice de Usuario.
+	var usuariosRecebidos []Usuario
+	err := json.NewDecoder(r.Body).Decode(&usuariosRecebidos)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	log.Printf("Atualizações de Humor Recebidas: %+v", stateUpdates)
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"message": "Atualizações de humor recebidas com sucesso"})
+	// Adiciona os usuários recebidos em blocos de 10.
+	for _, usuario := range usuariosRecebidos {
+		if len(blocos) == 0 || len(blocos[len(blocos)-1]) >= 10 {
+			// Cria um novo bloco se necessário.
+			blocos = append(blocos, []Usuario{})
+		}
+		blocos[len(blocos)-1] = append(blocos[len(blocos)-1], usuario)
+	}
+
+	// Resposta de sucesso.
+	fmt.Fprintf(w, "Dados recebidos com sucesso!")
 }
 
-type UserData struct {
-	Name       string `json:"name"`
-	Faltas     int    `json:"faltas"`
-	Humor      string `json:"humor"`
-	GraphImage string `json:"graphImage"`
-}
-
-func getHumorUpdatesHandler(w http.ResponseWriter, r *http.Request) {
-	if !applyCorsAndOptions(w, r) {
-		return
-	}
-	if r.Method == "OPTIONS" {
-		w.WriteHeader(http.StatusOK)
+func listarUsuariosHandler(w http.ResponseWriter, r *http.Request) {
+	// Obtém o número do bloco da query string, começando de 1.
+	blocoQuery := r.URL.Query().Get("bloco")
+	bloco, err := strconv.Atoi(blocoQuery)
+	if err != nil || bloco < 1 || bloco > len(blocos) {
+		http.Error(w, "Bloco inválido", http.StatusBadRequest)
 		return
 	}
 
-	if r.Method != "GET" {
-		http.Error(w, "Método não suportado", http.StatusMethodNotAllowed)
-		return
-	}
-
+	// Configura o Content-Type como application/json.
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(humorUpdates); err != nil {
-		log.Printf("Erro ao codificar a resposta JSON: %v", err)
-		http.Error(w, "Erro interno do servidor", http.StatusInternalServerError)
+
+	// Codifica o bloco especificado de usuarios em JSON e envia na resposta.
+	err = json.NewEncoder(w).Encode(blocos[bloco-1])
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
 
 func main() {
-	http.HandleFunc("/fetchUserData", fetchUserDataHandler)
+	// Define o handler para a rota "/updateStates".
 	http.HandleFunc("/updateStates", updateStatesHandler)
-	http.HandleFunc("/updateHumor", receiveHumorUpdates)
-	http.HandleFunc("/getHumorUpdates", getHumorUpdatesHandler)
 
-	fs := http.FileServer(http.Dir("packages/graph"))
-	http.Handle("/packages/graph/", http.StripPrefix("/packages/graph/", fs))
+	// Nova rota para listar os usuários por blocos.
+	http.HandleFunc("/usuarios", listarUsuariosHandler)
 
-	port := ":8080"
-	log.Printf("Servidor iniciando na porta %s\n", port)
-	if err := http.ListenAndServe(port, nil); err != nil {
-		log.Fatalf("Erro ao iniciar o servidor: %v", err)
+	// Inicia o servidor.
+	fmt.Println("Servidor iniciado na porta 8080...")
+	if err := http.ListenAndServe(":8080", nil); err != nil {
+		log.Fatal(err)
 	}
 }
-*/
